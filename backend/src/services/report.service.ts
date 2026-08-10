@@ -1,0 +1,165 @@
+import { Response } from 'express';
+import { Parser } from 'json2csv';
+import ExcelJS from 'exceljs';
+import PDFDocument from 'pdfkit';
+
+// Interface for standardized report layout
+export interface ReportData {
+  title: string;
+  filters: Record<string, any>;
+  summary: Record<string, any>;
+  columns: { header: string; key: string; width?: number }[];
+  rows: any[];
+}
+
+export const reportService = {
+  
+  async renderCSV(data: ReportData, res: Response) {
+    try {
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="${data.title.replace(/\s+/g, '_').toLowerCase()}.csv"`);
+      
+      const parser = new Parser({ fields: data.columns.map(c => c.key) });
+      const csv = parser.parse(data.rows);
+      
+      res.status(200).send(csv);
+    } catch (err) {
+      console.error(err);
+      res.status(500).send('Error generating CSV');
+    }
+  },
+
+  async renderExcel(data: ReportData, res: Response) {
+    try {
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${data.title.replace(/\s+/g, '_').toLowerCase()}.xlsx"`);
+
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = 'AttendX System';
+      const sheet = workbook.addWorksheet('Report');
+
+      // Add Title
+      sheet.addRow([data.title]);
+      sheet.getCell('A1').font = { size: 16, bold: true };
+      sheet.addRow([]);
+
+      // Add Filters
+      sheet.addRow(['Applied Filters:']);
+      sheet.getCell('A3').font = { bold: true };
+      Object.entries(data.filters).forEach(([k, v]) => {
+        sheet.addRow([`${k}:`, v]);
+      });
+      sheet.addRow([]);
+
+      // Add Summary
+      sheet.addRow(['Summary:']);
+      sheet.getCell(`A${sheet.rowCount}`).font = { bold: true };
+      Object.entries(data.summary).forEach(([k, v]) => {
+        sheet.addRow([`${k}:`, v]);
+      });
+      sheet.addRow([]);
+
+      // Add Data Table
+      const tableHeaderRow = sheet.addRow(data.columns.map(c => c.header));
+      tableHeaderRow.font = { bold: true };
+      
+      // Set columns keys so we can just addRows
+      sheet.columns = data.columns.map(c => ({
+        header: c.header,
+        key: c.key,
+        width: c.width || 15
+      }));
+
+      // We added header manually above for formatting, so we'll just push data
+      data.rows.forEach(row => {
+        const rowData: any = {};
+        data.columns.forEach(c => rowData[c.key] = row[c.key]);
+        sheet.addRow(rowData);
+      });
+
+      await workbook.xlsx.write(res);
+      res.end();
+    } catch (err) {
+      console.error(err);
+      res.status(500).send('Error generating Excel');
+    }
+  },
+
+  async renderPDF(data: ReportData, res: Response) {
+    try {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${data.title.replace(/\s+/g, '_').toLowerCase()}.pdf"`);
+
+      const doc = new PDFDocument({ margin: 30, size: 'A4' });
+      doc.pipe(res);
+
+      // Header
+      doc.fontSize(20).text('AttendX', { align: 'center' });
+      doc.fontSize(16).text(data.title, { align: 'center' });
+      doc.moveDown();
+
+      // Meta
+      doc.fontSize(10).text(`Generated: ${new Date().toLocaleString()}`);
+      doc.moveDown();
+
+      // Filters
+      doc.fontSize(12).font('Helvetica-Bold').text('Applied Filters:');
+      doc.font('Helvetica').fontSize(10);
+      Object.entries(data.filters).forEach(([k, v]) => {
+        doc.text(`${k}: ${v}`);
+      });
+      doc.moveDown();
+
+      // Summary
+      doc.fontSize(12).font('Helvetica-Bold').text('Summary:');
+      doc.font('Helvetica').fontSize(10);
+      Object.entries(data.summary).forEach(([k, v]) => {
+        doc.text(`${k}: ${v}`);
+      });
+      doc.moveDown();
+
+      // Basic Table (A real table requires complex math in PDFKit, so we use tabbed formatting)
+      doc.fontSize(10).font('Helvetica-Bold');
+      const startX = 30;
+      let currentY = doc.y;
+      
+      // Calculate column widths simply
+      const colWidth = (595 - 60) / data.columns.length; // A4 width is 595
+
+      data.columns.forEach((col, i) => {
+        doc.text(col.header, startX + (i * colWidth), currentY, { width: colWidth });
+      });
+      
+      currentY += 20;
+      doc.font('Helvetica');
+
+      data.rows.forEach(row => {
+        if (currentY > 750) {
+          doc.addPage();
+          currentY = 50;
+        }
+        data.columns.forEach((col, i) => {
+          doc.text(String(row[col.key] || ''), startX + (i * colWidth), currentY, { width: colWidth, lineBreak: false });
+        });
+        currentY += 15;
+      });
+
+      // Footer
+      const pages = doc.bufferedPageRange();
+      for (let i = 0; i < pages.count; i++) {
+        doc.switchToPage(i);
+        doc.fontSize(8).text(
+          `Page ${i + 1} of ${pages.count} - Generated by AttendX`,
+          0,
+          800,
+          { align: 'center', width: doc.page.width }
+        );
+      }
+
+      doc.end();
+    } catch (err) {
+      console.error(err);
+      res.status(500).send('Error generating PDF');
+    }
+  }
+};
