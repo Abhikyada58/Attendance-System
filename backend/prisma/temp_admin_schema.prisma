@@ -1,0 +1,27 @@
+
+// ------------------------------------------------------
+// SYSTEM & AUDIT MODELS
+// ------------------------------------------------------
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  actorUserId String   // The Admin who performed the action
+  action      String   // e.g. "USER_DEACTIVATED", "SUBJECT_UPDATED"
+  entityType  String   // e.g. "User", "Subject"
+  entityId    String   
+  metadata    Json?    // Safe metadata
+  createdAt   DateTime @default(now())
+
+  actor       User     @relation(fields: [actorUserId], references: [id], onDelete: Cascade)
+  
+  @@index([actorUserId])
+  @@index([action])
+  @@index([entityType, entityId])
+}
+
+model SystemSetting {
+  key         String   @id // e.g. "WARNING_THRESHOLD", "FACE_THRESHOLD"
+  value       String   
+  description String?
+  updatedAt   DateTime @updatedAt
+}

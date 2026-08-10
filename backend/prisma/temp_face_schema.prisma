@@ -1,0 +1,18 @@
+
+enum FaceProfileStatus {
+  ACTIVE
+  DISABLED
+  REQUIRES_REENROLLMENT
+}
+
+model FaceProfile {
+  id               String            @id @default(uuid())
+  studentId        String            @unique
+  embedding        Float[]
+  embeddingVersion String            @default("v1")
+  status           FaceProfileStatus @default(ACTIVE)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  student          Student           @relation(fields: [studentId], references: [id], onDelete: Cascade)
+}
