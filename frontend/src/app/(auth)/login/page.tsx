@@ -6,8 +6,7 @@ import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Eye, EyeOff, Loader2 } from 'lucide-react';
+import { Eye, EyeOff, Loader2, AlertCircle } from 'lucide-react';
 import Link from 'next/link';
 
 export default function LoginPage() {
@@ -16,23 +15,16 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  
+
   const { login } = useAuth();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
-
     try {
-      // POST to our backend API wrapper
-      const response = await api('/auth/login', {
-        data: { email, password }
-      });
-      
-      // Update global auth state
+      const response = await api('/auth/login', { data: { email, password } });
       login(response.token, response.user);
-
     } catch (err: any) {
       setError(err.message || 'Login failed. Please check your credentials.');
     } finally {
@@ -41,82 +33,92 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex items-center justify-center min-h-[80vh] p-4">
-      {/* Glassmorphism card matching Module 1 design system */}
-      <Card className="w-full max-w-md border-border/50 bg-background/60 backdrop-blur-xl shadow-2xl">
-        <CardHeader className="space-y-1 text-center">
-          <CardTitle className="text-3xl font-bold tracking-tight">Welcome back</CardTitle>
-          <CardDescription className="text-muted-foreground">
-            Enter your institutional email to sign in to AttendX
-          </CardDescription>
-        </CardHeader>
-        
-        <form onSubmit={handleLogin}>
-          <CardContent className="space-y-4">
-            {error && (
-              <div className="p-3 text-sm text-red-500 bg-red-100/10 border border-red-500/20 rounded-md">
-                {error}
-              </div>
-            )}
-            
-            <div className="space-y-2">
-              <Label htmlFor="email">Institutional Email</Label>
-              <Input 
-                id="email" 
-                type="email" 
-                placeholder="24cs040@charusat.edu.in" 
-                required 
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="bg-background/50 border-border/50"
+    <div className="flex flex-col items-center justify-center w-full">
+      {/* Logo */}
+      <div className="flex items-center gap-3 mb-8">
+        <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center shadow-md">
+          <span className="text-white font-black text-lg">A</span>
+        </div>
+        <span className="text-2xl font-black text-indigo-600 tracking-tight">AttendX</span>
+      </div>
+
+      {/* Card */}
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-gray-100 p-8">
+        <div className="mb-7">
+          <h2 className="text-2xl font-bold text-gray-900">Welcome back</h2>
+          <p className="text-gray-500 text-sm mt-1">Enter your institutional email to sign in</p>
+        </div>
+
+        <form onSubmit={handleLogin} className="space-y-5">
+          {error && (
+            <div className="flex items-center gap-2 p-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl">
+              <AlertCircle className="w-4 h-4 flex-shrink-0" />
+              {error}
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+            <Label htmlFor="email" className="text-gray-700 text-sm font-medium">
+              Institutional Email
+            </Label>
+            <Input
+              id="email"
+              type="email"
+              placeholder="24cs040@charusat.edu.in"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="h-11 border-gray-200 bg-gray-50 focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 rounded-xl text-gray-900 placeholder:text-gray-400 transition-all"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="password" className="text-gray-700 text-sm font-medium">
+              Password
+            </Label>
+            <div className="relative">
+              <Input
+                id="password"
+                type={showPassword ? 'text' : 'password'}
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="h-11 border-gray-200 bg-gray-50 focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 rounded-xl text-gray-900 pr-12 transition-all"
               />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
             </div>
-            
-            <div className="space-y-2 relative">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="password">Password</Label>
-              </div>
-              <div className="relative">
-                <Input 
-                  id="password" 
-                  type={showPassword ? "text" : "password"} 
-                  required 
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="bg-background/50 border-border/50 pr-10"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
-              </div>
-            </div>
-          </CardContent>
-          
-          <CardFooter className="flex flex-col space-y-4">
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Signing in...
-                </>
-              ) : (
-                'Sign In'
-              )}
-            </Button>
-            
-            <div className="text-center text-sm text-muted-foreground">
-              Don't have an account?{' '}
-              <Link href="/register" className="font-medium text-primary hover:underline">
-                Register here
-              </Link>
-            </div>
-          </CardFooter>
+          </div>
+
+          <Button
+            type="submit"
+            disabled={loading}
+            className="w-full h-11 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl shadow-sm transition-all duration-200 mt-1"
+          >
+            {loading ? (
+              <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Signing in...</>
+            ) : (
+              'Sign In'
+            )}
+          </Button>
         </form>
-      </Card>
+
+        <div className="mt-6 pt-5 border-t border-gray-100 text-center">
+          <p className="text-sm text-gray-500">
+            Don&apos;t have an account?{' '}
+            <Link href="/register" className="text-indigo-600 hover:text-indigo-700 font-semibold transition-colors">
+              Register here
+            </Link>
+          </p>
+        </div>
+      </div>
+
+      <p className="text-gray-400 text-xs mt-6">© 2025 AttendX · CSPIT · Charusat University</p>
     </div>
   );
 }

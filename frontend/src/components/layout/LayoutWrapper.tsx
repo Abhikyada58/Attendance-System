@@ -11,8 +11,15 @@ export function LayoutWrapper({ children }: { children: React.ReactNode }) {
 
   if (isAuthPage) {
     return (
-      <main className="flex-1 w-full min-h-screen">
-        {children}
+      <main className="flex items-center justify-center min-h-screen w-full bg-gray-50">
+        {/* Subtle background pattern */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <div className="absolute -top-40 -right-40 w-96 h-96 bg-indigo-100/60 rounded-full blur-3xl" />
+          <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-violet-100/60 rounded-full blur-3xl" />
+        </div>
+        <div className="relative z-10 w-full px-4">
+          {children}
+        </div>
       </main>
     );
   }

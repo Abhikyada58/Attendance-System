@@ -22,6 +22,9 @@ model User {
   role         Role          @default(STUDENT)
   status       AccountStatus @default(ACTIVE)
 
+  instituteId  String?
+  institute    Institute?    @relation(fields: [instituteId], references: [id])
+
   student Student?
   faculty Faculty?
 
@@ -38,6 +41,9 @@ model User {
   ticketComments   TicketComment[]
   authoredArticles KnowledgeArticle[]
 
+  // Module 25 — Security
+  sessions         UserSession[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -46,6 +52,7 @@ enum Role {
   STUDENT
   FACULTY
   ADMIN
+  SUPER_ADMIN
 }
 
 enum AccountStatus {
@@ -117,12 +124,21 @@ model Faculty {
 // ACADEMIC STRUCTURE MODELS
 // ------------------------------------------------------
 
-model Institute {
-  id       String  @id @default(uuid())
-  name     String
-  code     String  @unique
-  isActive Boolean @default(true)
+enum InstituteStatus {
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+  PENDING
+}
 
+model Institute {
+  id       String          @id @default(uuid())
+  name     String
+  code     String          @unique
+  status   InstituteStatus @default(ACTIVE)
+  timezone String          @default("UTC")
+
+  users       User[]
   departments Department[]
   students    Student[]
   faculties   Faculty[]
@@ -820,4 +836,335 @@ model KnowledgeArticle {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// ------------------------------------------------------
+// MODULE 25 — SECURITY, PRIVACY & COMPLIANCE MODELS
+// ------------------------------------------------------
+
+/// Tracks active login sessions so users can view/revoke them.
+model UserSession {
+  id          String    @id @default(uuid())
+  userId      String
+  tokenHash   String    @unique // SHA-256 of JWT, never store raw token
+  deviceInfo  String?   // e.g. "Chrome 125 on Windows"
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime  @default(now())
+  lastUsedAt  DateTime  @default(now())
+  expiresAt   DateTime
+  revokedAt   DateTime? // null = active
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@index([expiresAt])
+}
+
+/// Tracks failed login attempts per email for lockout protection.
+model LoginAttempt {
+  id          String   @id @default(uuid())
+  email       String
+  ipAddress   String?
+  success     Boolean  @default(false)
+  failReason  String?
+  createdAt   DateTime @default(now())
+
+  @@index([email, createdAt])
+  @@index([ipAddress, createdAt])
+}
+
+enum SecurityEventType {
+  LOGIN_SUCCESS
+  LOGIN_FAILED
+  LOGOUT
+  SESSION_REVOKED
+  ALL_SESSIONS_REVOKED
+  PASSWORD_CHANGED
+  PASSWORD_RESET_REQUESTED
+  ROLE_CHANGED
+  ACCOUNT_LOCKED
+  ACCOUNT_UNLOCKED
+  UNAUTHORIZED_ACCESS
+  RATE_LIMIT_TRIGGERED
+  SUSPICIOUS_ACTIVITY
+  ADMIN_SETTING_CHANGED
+  FEATURE_FLAG_CHANGED
+  BIOMETRIC_ENROLLED
+  BIOMETRIC_DELETED
+  DATA_EXPORT_REQUESTED
+  DATA_EXPORT_DOWNLOADED
+  ATTENDANCE_FRAUD_DETECTED
+  BULK_ACTION_PERFORMED
+}
+
+enum SecuritySeverity {
+  INFO
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum SecurityEventStatus {
+  OPEN
+  INVESTIGATING
+  RESOLVED
+  FALSE_POSITIVE
+}
+
+/// Immutable security event log — actors cannot modify their own entries.
+model SecurityEvent {
+  id          String              @id @default(uuid())
+  type        SecurityEventType
+  severity    SecuritySeverity    @default(INFO)
+  actorId     String?             // userId who triggered the event
+  targetId    String?             // userId/resourceId affected
+  metadata    Json?               // safe context (no secrets)
+  ipAddress   String?
+  userAgent   String?
+  requestId   String?
+  status      SecurityEventStatus @default(OPEN)
+  adminNotes  String?             // investigation notes, admin only
+  createdAt   DateTime            @default(now())
+  resolvedAt  DateTime?
+
+  @@index([type])
+  @@index([actorId])
+  @@index([severity])
+  @@index([createdAt])
+  @@index([status])
+}
+
+enum ExportStatus {
+  PENDING
+  PROCESSING
+  READY
+  DOWNLOADED
+  EXPIRED
+  FAILED
+}
+
+/// Tracks personal data export requests (GDPR-style).
+model DataExportRequest {
+  id          String       @id @default(uuid())
+  userId      String
+  status      ExportStatus @default(PENDING)
+  filePath    String?      // server-side path, never exposed directly
+  expiresAt   DateTime?    // export file expires after this
+  downloadedAt DateTime?
+  requestedAt DateTime     @default(now())
+  completedAt DateTime?
+
+  @@index([userId])
+  @@index([status])
+}
+
+// ======================================================
+// MODULE 26 — OBSERVABILITY, MONITORING & INCIDENTS
+// ======================================================
+
+enum LogLevel {
+  DEBUG
+  INFO
+  WARN
+  ERROR
+  FATAL
+}
+
+/// Structured application log entry — for important events only, not every request.
+/// High-volume request logs stay in process stdout (structured JSON).
+model AppLog {
+  id        String   @id @default(uuid())
+  level     LogLevel @default(INFO)
+  service   String   // e.g. "auth", "attendance", "qr", "cron"
+  event     String   // e.g. "LOGIN_FAILED", "JOB_COMPLETED"
+  message   String
+  requestId String?
+  userId    String?  // internal ID only, never email/name
+  duration  Int?     // ms
+  metadata  Json?    // safe context — no secrets, no PII
+  createdAt DateTime @default(now())
+
+  @@index([level])
+  @@index([service])
+  @@index([event])
+  @@index([createdAt])
+  @@index([requestId])
+}
+
+enum IncidentSeverity {
+  SEV1  // Critical — system down or data integrity at risk
+  SEV2  // High — major feature broken, many users affected
+  SEV3  // Medium — degraded service, workaround available
+  SEV4  // Low — minor issue, minimal impact
+}
+
+enum IncidentStatus {
+  DETECTED
+  INVESTIGATING
+  MITIGATING
+  MONITORING
+  RESOLVED
+  CLOSED
+}
+
+/// Incident record for operational issues tracked by admins.
+model Incident {
+  id             String           @id @default(uuid())
+  incidentNumber String           @unique // e.g. INC-2026-0001
+  title          String
+  description    String?
+  severity       IncidentSeverity @default(SEV3)
+  status         IncidentStatus   @default(DETECTED)
+  affectedService String?         // e.g. "QR", "Face Recognition", "Notifications"
+
+  detectedAt     DateTime         @default(now())
+  acknowledgedAt DateTime?
+  resolvedAt     DateTime?
+  closedAt       DateTime?
+
+  createdById    String           // userId of reporter
+  assignedToId   String?          // userId of owner
+
+  // Post-mortem fields
+  rootCause      String?
+  impactSummary  String?
+  preventionNotes String?
+
+  notes          IncidentNote[]
+
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@index([status])
+  @@index([severity])
+  @@index([createdAt])
+  @@index([assignedToId])
+}
+
+/// Timestamped investigation notes on an incident.
+model IncidentNote {
+  id         String   @id @default(uuid())
+  incidentId String
+  authorId   String   // userId
+  content    String
+  createdAt  DateTime @default(now())
+
+  incident   Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  @@index([incidentId])
+}
+
+/// Periodic metric snapshots persisted for trend analysis.
+/// Real-time metrics stay in process memory (MetricsRegistry).
+model AppMetricSnapshot {
+  id        String   @id @default(uuid())
+  metric    String   // e.g. "api.requests.total", "attendance.success"
+  value     Float
+  tags      Json?    // { endpoint, method, status }
+  capturedAt DateTime @default(now())
+
+  @@index([metric])
+  @@index([capturedAt])
+}
+
+// ======================================================
+// MODULE 30 — API GATEWAY, INTEGRATIONS & WEBHOOKS
+// ======================================================
+
+/// Secure API Keys for Machine-to-Machine external integrations.
+model ApiKey {
+  id          String    @id @default(uuid())
+  keyPrefix   String    // Safe to show (e.g., "att_live_1a2b...")
+  keyHash     String    @unique // Hashed full secret
+  name        String    // e.g., "ERP Sync System"
+  scopes      String[]  // Array of scopes: "attendance:read", "students:write"
+  
+  instituteId String?   // Nullable for SUPER_ADMIN keys, otherwise tied to tenant
+  createdBy   String    // userId who generated it
+  
+  status      ApiKeyStatus @default(ACTIVE)
+  expiresAt   DateTime?
+  lastUsedAt  DateTime?
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([instituteId])
+  @@index([keyPrefix])
+}
+
+enum ApiKeyStatus {
+  ACTIVE
+  REVOKED
+  EXPIRED
+}
+
+/// Webhook subscriptions for pushing events to external systems.
+model WebhookEndpoint {
+  id          String   @id @default(uuid())
+  instituteId String   // Webhooks are always scoped to a tenant
+  url         String
+  secret      String   // Used to sign the payload (HMAC)
+  description String?
+  isActive    Boolean  @default(true)
+  events      String[] // e.g., ["attendance.created", "student.registered"]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  deliveries  WebhookDelivery[]
+
+  @@index([instituteId])
+}
+
+enum WebhookStatus {
+  SUCCESS
+  FAILED
+  RETRYING
+}
+
+/// Audit log for webhook payload delivery attempts.
+model WebhookDelivery {
+  id          String   @id @default(uuid())
+  endpointId  String
+  eventId     String
+  eventType   String
+  status      WebhookStatus
+  statusCode  Int?
+  payload     Json?    // Omit sensitive data
+  response    String?
+  attempts    Int      @default(1)
+  
+  createdAt   DateTime @default(now())
+  
+  endpoint    WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@index([endpointId])
+  @@index([eventId])
+  @@index([createdAt])
+}
+
+/// Idempotency keys prevent duplicate critical POST operations (e.g. double charging, double marking).
+model IdempotencyKey {
+  id          String   @id // The provided Idempotency-Key header
+  instituteId String?
+  userId      String?
+  endpoint    String
+  response    Json?    // Stored successful response body
+  statusCode  Int?
+  status      IdempotencyStatus @default(PROCESSING)
+  lockedAt    DateTime @default(now())
+  expiresAt   DateTime // Usually 24-48 hours
+  
+  @@index([instituteId])
+  @@index([expiresAt])
+}
+
+enum IdempotencyStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
 }

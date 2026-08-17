@@ -1,10 +1,15 @@
 import { Router } from 'express';
-import { checkHealth } from '../../controllers/health.controller';
+import { fullHealthCheck, livenessCheck, readinessCheck } from '../../controllers/health.controller';
 
 const router = Router();
 
-// Used for Docker Healthchecks and Uptime monitoring
-router.get('/', checkHealth);
-router.get('/ready', checkHealth); // In a larger system, readiness might check external services (Redis, etc.)
+// GET /health       — full health check (DB + AI + services + metrics)
+router.get('/', fullHealthCheck);
+
+// GET /health/live  — liveness: is the process running?
+router.get('/live', livenessCheck);
+
+// GET /health/ready — readiness: can the instance accept traffic?
+router.get('/ready', readinessCheck);
 
 export default router;

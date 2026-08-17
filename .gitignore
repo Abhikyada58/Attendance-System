@@ -32,6 +32,27 @@ yarn-error.log*
 .env*.local
 .env
 backend/.env
+frontend/.env.local
+**/.env
+**/.env.local
+**/.env.production
+
+# Secret keys and certificates
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+id_rsa
+id_ed25519
+
+# Data exports (personal data — must not be committed)
+**/exports/
+**/*-export-*.json
+
+# Module 25 — Security
+**/security-events-*.json
 
 # vercel
 .vercel

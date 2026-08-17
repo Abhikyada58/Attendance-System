@@ -1,0 +1,100 @@
+openapi: 3.0.3
+info:
+  title: AttendX API
+  version: 1.0.0
+  description: API Gateway for the AttendX Smart Attendance Management System.
+servers:
+  - url: /api/v1
+    description: v1 API Endpoints
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Provide the JWT token returned by the login endpoint.
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: x-api-key
+      description: Provide the machine-to-machine API Key.
+  responses:
+    Unauthorized:
+      description: Missing or invalid authentication token/key.
+    Forbidden:
+      description: The authenticated user does not have permission for this resource.
+security:
+  - bearerAuth: []
+  - apiKeyAuth: []
+paths:
+  /auth/login:
+    post:
+      summary: Authenticate a user
+      tags:
+        - Authentication
+      security: [] # No auth required for login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+      responses:
+        '200':
+          description: Successful login
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  token:
+                    type: string
+                  user:
+                    type: object
+        '401':
+          description: Invalid credentials
+  /attendance/qr/validate:
+    post:
+      summary: Validate a Dynamic QR Code for Attendance
+      tags:
+        - Attendance
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          schema:
+            type: string
+          required: false
+          description: Unique key to prevent duplicate attendance marks.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - token
+                - sessionId
+              properties:
+                token:
+                  type: string
+                sessionId:
+                  type: string
+      responses:
+        '200':
+          description: Attendance marked successfully
+        '400':
+          description: Invalid or expired QR token
+        '409':
+          description: Attendance already marked (or Idempotency conflict)

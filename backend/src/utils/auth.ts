@@ -32,6 +32,7 @@ export const verifyPassword = async (password: string, hash: string): Promise<bo
 export interface JwtPayload {
   userId: string;
   role: string;
+  instituteId?: string | null;
 }
 
 /**

@@ -1,5 +1,7 @@
 import { prisma } from '../utils/prisma';
 import { SessionStatus, AttendanceStatus } from '@prisma/client';
+import { cacheService } from './cache.service';
+import { backgroundQueue } from './queue.service';
 
 export const attendanceService = {
 
@@ -34,19 +36,22 @@ export const attendanceService = {
     });
   },
 
-  // 2. Get Session Details
+  // 2. Get Session Details (Optimized with Cache)
   async getSession(facultyUserId: string, sessionId: string) {
     const faculty = await prisma.faculty.findUnique({ where: { userId: facultyUserId } });
     if (!faculty) throw new Error('Faculty not found');
 
-    const session = await prisma.attendanceSession.findUnique({
-      where: { id: sessionId },
-      include: {
-        teachingAssignment: {
-          include: { class: true, subject: true, semester: true, academicYear: true }
+    const cacheKey = `session:${sessionId}`;
+    const session = await cacheService.getOrSet(cacheKey, async () => {
+      return prisma.attendanceSession.findUnique({
+        where: { id: sessionId },
+        include: {
+          teachingAssignment: {
+            include: { class: true, subject: true, semester: true, academicYear: true }
+          }
         }
-      }
-    });
+      });
+    }, 5 * 60 * 1000); // 5 min TTL
 
     if (!session) throw new Error('Session not found');
     if (session.teachingAssignment.facultyId !== faculty.id) {
@@ -129,46 +134,48 @@ export const attendanceService = {
     return record;
   },
 
-  // 5. Bulk Mark Attendance (Atomic Transaction)
+  // 5. Bulk Mark Attendance (Optimized Transaction)
   async bulkMarkAttendance(facultyUserId: string, sessionId: string, records: { studentId: string, status: AttendanceStatus }[]) {
     const session = await this.getSession(facultyUserId, sessionId);
     if (session.status !== SessionStatus.OPEN) throw new Error('Session is closed or cancelled');
 
-    // Verify all students belong to the class
     const classId = session.teachingAssignment.classId;
     const studentIds = records.map(r => r.studentId);
-    const validStudents = await prisma.student.findMany({
+    
+    // Quick count check instead of fetching full student objects
+    const validStudentCount = await prisma.student.count({
       where: { id: { in: studentIds }, classId }
     });
 
-    if (validStudents.length !== records.length) {
+    if (validStudentCount !== records.length) {
       throw new Error('One or more students do not belong to this class or do not exist');
     }
 
-    // Atomic transaction: if any upsert fails, the entire block rolls back
-    const results = await prisma.$transaction(
-      records.map(record => 
-        prisma.attendanceRecord.upsert({
-          where: {
-            sessionId_studentId: { sessionId, studentId: record.studentId }
-          },
-          update: {
-            status: record.status,
-            markedAt: new Date(),
-            markedBy: facultyUserId
-          },
-          create: {
-            sessionId,
-            studentId: record.studentId,
-            status: record.status,
-            markedAt: new Date(),
-            markedBy: facultyUserId
-          }
-        })
-      )
-    );
+    const now = new Date();
+    
+    // Group records by status to use optimized updateMany / createMany approach
+    // For simplicity and safety in Prisma, deleting existing and bulk inserting is often faster than N upserts
+    await prisma.$transaction(async (tx) => {
+      // 1. Delete existing records for these students in this session
+      await tx.attendanceRecord.deleteMany({
+        where: { sessionId, studentId: { in: studentIds } }
+      });
+      
+      // 2. Bulk insert new records
+      await tx.attendanceRecord.createMany({
+        data: records.map(r => ({
+          sessionId,
+          studentId: r.studentId,
+          status: r.status,
+          markedAt: now,
+          markedBy: facultyUserId
+        }))
+      });
+    });
 
-    import('./notification.events').then(({ attendanceEmitter }) => {
+    // Fire notifications via background queue to prevent blocking
+    backgroundQueue.enqueue('bulk_attendance_notifications', async () => {
+      const { attendanceEmitter } = await import('./notification.events');
       records.forEach(r => {
         attendanceEmitter.emit('attendance.marked', {
           studentId: r.studentId,
@@ -179,7 +186,7 @@ export const attendanceService = {
       });
     });
 
-    return results;
+    return { count: records.length, message: 'Bulk attendance recorded successfully' };
   },
 
   // 6. Close Session

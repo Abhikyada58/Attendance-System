@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { qrController } from '../../controllers/qr.controller';
 import { requireAuth } from '../../middleware/requireAuth';
 import { requireRole } from '../../middleware/requireRole';
+import { idempotencyMiddleware } from '../../middleware/idempotency.middleware';
 
 const router = Router();
 
@@ -25,7 +26,7 @@ router.use('/', facultyRouter);
 const studentRouter = Router();
 studentRouter.use(requireRole('STUDENT'));
 
-studentRouter.post('/qr/scan', qrController.scanToken);
+studentRouter.post('/qr/scan', idempotencyMiddleware, qrController.scanToken);
 
 router.use('/', studentRouter);
 

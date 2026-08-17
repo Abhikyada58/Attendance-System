@@ -6,6 +6,7 @@
  */
 
 import { prisma } from '../utils/prisma';
+import { cacheService } from './cache.service';
 
 export const academicService = {
   
@@ -13,16 +14,28 @@ export const academicService = {
   // INSTITUTE MANAGEMENT
   // ---------------------------------------------------------
   async createInstitute(data: { name: string; code: string }) {
-    return await prisma.institute.create({ data });
+    const res = await prisma.institute.create({ data });
+    cacheService.invalidatePrefix('academic:institutes');
+    return res;
   },
 
   async getInstitutes(activeOnly = false) {
-    const where = activeOnly ? { isActive: true } : {};
-    return await prisma.institute.findMany({ where, orderBy: { name: 'asc' } });
+    const cacheKey = `academic:institutes:${activeOnly}`;
+    return await cacheService.getOrSet(cacheKey, async () => {
+      const where = activeOnly ? { status: 'ACTIVE' as const } : {};
+      return await prisma.institute.findMany({ where, orderBy: { name: 'asc' } });
+    }, 10 * 60 * 1000); // 10 min TTL
   },
 
-  async updateInstitute(id: string, data: { name?: string; code?: string; isActive?: boolean }) {
-    return await prisma.institute.update({ where: { id }, data });
+  async updateInstitute(id: string, data: { name?: string; code?: string; status?: 'ACTIVE' | 'SUSPENDED' | 'ARCHIVED'; isActive?: boolean }) {
+    const updateData: any = { ...data };
+    if (data.isActive !== undefined) {
+      updateData.status = data.isActive ? 'ACTIVE' : 'SUSPENDED';
+      delete updateData.isActive;
+    }
+    const res = await prisma.institute.update({ where: { id }, data: updateData });
+    cacheService.invalidatePrefix('academic:institutes');
+    return res;
   },
 
   // ---------------------------------------------------------
@@ -33,23 +46,30 @@ export const academicService = {
     const inst = await prisma.institute.findUnique({ where: { id: data.instituteId } });
     if (!inst) throw new Error('Institute not found');
     
-    return await prisma.department.create({ data });
+    const res = await prisma.department.create({ data });
+    cacheService.invalidatePrefix('academic:departments');
+    return res;
   },
 
   async getDepartments(filters?: { instituteId?: string; activeOnly?: boolean }) {
-    const where: any = {};
-    if (filters?.instituteId) where.instituteId = filters.instituteId;
-    if (filters?.activeOnly) where.isActive = true;
+    const cacheKey = `academic:departments:${filters?.instituteId || 'all'}:${filters?.activeOnly || false}`;
+    return await cacheService.getOrSet(cacheKey, async () => {
+      const where: any = {};
+      if (filters?.instituteId) where.instituteId = filters.instituteId;
+      if (filters?.activeOnly) where.isActive = true;
 
-    return await prisma.department.findMany({ 
-      where, 
-      include: { institute: { select: { name: true, code: true } } },
-      orderBy: { name: 'asc' } 
-    });
+      return await prisma.department.findMany({ 
+        where, 
+        include: { institute: { select: { name: true, code: true } } },
+        orderBy: { name: 'asc' } 
+      });
+    }, 10 * 60 * 1000);
   },
 
   async updateDepartment(id: string, data: { name?: string; code?: string; isActive?: boolean }) {
-    return await prisma.department.update({ where: { id }, data });
+    const res = await prisma.department.update({ where: { id }, data });
+    cacheService.invalidatePrefix('academic:departments');
+    return res;
   },
 
   // ---------------------------------------------------------

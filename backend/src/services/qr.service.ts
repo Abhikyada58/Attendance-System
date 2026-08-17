@@ -1,6 +1,8 @@
 import { prisma } from '../utils/prisma';
 import crypto from 'crypto';
 import { AttendanceStatus } from '@prisma/client';
+import { cacheService } from './cache.service';
+import { backgroundQueue } from './queue.service';
 
 const QR_TOKEN_TTL_SECONDS = 60;
 
@@ -112,14 +114,18 @@ export const qrService = {
 
     const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
 
-    const qrToken = await prisma.qRCodeToken.findUnique({
-      where: { tokenHash },
-      include: {
-        session: {
-          include: { teachingAssignment: true }
+    // 1. Check cache first for the QR token
+    const cacheKey = `qr:${tokenHash}`;
+    const qrToken = await cacheService.getOrSet(cacheKey, async () => {
+      return prisma.qRCodeToken.findUnique({
+        where: { tokenHash },
+        include: {
+          session: {
+            include: { teachingAssignment: true }
+          }
         }
-      }
-    });
+      });
+    }, 5000); // 5 sec TTL (very short to respect revocation/expiration while buffering spikes)
 
     if (!qrToken) throw new Error('INVALID_QR: QR code not recognized');
     if (qrToken.revokedAt) throw new Error('QR_REVOKED: This QR code has been revoked by the faculty');
@@ -132,13 +138,14 @@ export const qrService = {
       throw new Error('WRONG_CLASS: You are not enrolled in the class for this session');
     }
 
-    // Check for duplicate safely and insert if not exists
-    // We use a transaction to prevent race conditions during double scanning
+    // 2. Check for duplicate safely and insert if not exists
+    // Using transaction but relying heavily on the unique constraint index
     return await prisma.$transaction(async (tx) => {
       const existing = await tx.attendanceRecord.findUnique({
         where: {
           sessionId_studentId: { sessionId: session.id, studentId: student.id }
-        }
+        },
+        select: { id: true } // optimize query
       });
 
       if (existing) {
@@ -155,8 +162,9 @@ export const qrService = {
         }
       });
 
-      // Fire notification event asynchronously
-      import('./notification.events').then(({ attendanceEmitter }) => {
+      // Fire notification event asynchronously via background queue
+      backgroundQueue.enqueue(`qr_attendance_${student.id}`, async () => {
+        const { attendanceEmitter } = await import('./notification.events');
         attendanceEmitter.emit('attendance.marked', {
           studentId: student.id,
           sessionId: session.id,

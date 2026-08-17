@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
 import { LayoutWrapper } from "@/components/layout/LayoutWrapper";
+import { NavigationProgress } from "@/components/ui/NavigationProgress";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -20,6 +21,7 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${inter.className} min-h-screen bg-background antialiased selection:bg-primary selection:text-primary-foreground`}>
         <AuthProvider>
+          <NavigationProgress />
           <LayoutWrapper>
             {children}
           </LayoutWrapper>
